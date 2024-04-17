@@ -7,11 +7,25 @@ import {
   deriveFormulaTree,
   FormulaSVGSpecNode,
   FormulaSVGTransform,
+  AugmentedFormula,
+  Script,
+  Identifier,
+  Numeral,
+  Op,
+  NewLine,
+  AlignMarker,
 } from "./FormulaTree";
+
+window.changeFormula = (latex: string) => {
+  formulaStore.updateFormula(deriveFormulaTree(latex).augmentedFormula);
+};
 
 export const RenderedFormula = () => {
   useEffect(() => {
-    formulaStore.updateFormula(deriveFormulaTree("a + b = c").augmentedFormula);
+    console.log("Setting initial formula...");
+    formulaStore.updateFormula(
+      deriveFormulaTree("a^2 + b^2 = \\\\ c^2").augmentedFormula,
+    );
   }, []);
 
   return <RenderedFormulaSVG />;
@@ -52,12 +66,14 @@ const RenderedFormulaDefs = ({
 };
 
 const transformString = (spec: FormulaSVGTransform) => {
+  // TODO: This assumes that translate always comes before scale,
+  // I should double check this in the MathJax source code
   let transform = "";
-  if (spec.scale) {
-    transform += `scale(${spec.scale.x}, ${spec.scale.y}) `;
-  }
   if (spec.translate) {
     transform += `translate(${spec.translate.x}, ${spec.translate.y}) `;
+  }
+  if (spec.scale) {
+    transform += `scale(${spec.scale.x}, ${spec.scale.y}) `;
   }
   return transform.length > 0 ? transform : undefined;
 };
@@ -104,7 +120,7 @@ const RenderedFormulaLeaf = observer(({ id, linkHref }: FormulaLeafProps) => {
         rect.left,
         rect.top,
         rect.width,
-        rect.height
+        rect.height,
       );
     }
   }, [id, linkHref]);

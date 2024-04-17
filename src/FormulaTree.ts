@@ -1,10 +1,17 @@
-import * as prettier from "prettier/standalone";
 import * as babelPlugin from "prettier/parser-babel";
 import * as estreePlugin from "prettier/plugins/estree";
+import * as prettier from "prettier/standalone";
 
 export const debugLatex = async (latex: string) => {
   const svg: SVGElement = MathJax.tex2svg(latex).querySelector("svg");
-  const mml: MathMLElement = MathJax.tex2mml(latex);
+
+  const serializedMml: string = MathJax.tex2mml(latex);
+  const mmlWrapper = document.createElement("div");
+  mmlWrapper.innerHTML = serializedMml;
+  const mml = mmlWrapper.querySelector("math");
+
+  window.debugSvg = svg;
+  window.debugMml = mml;
 
   const formattedSvg = await prettier.format(svg.outerHTML, {
     parser: "babel",
@@ -12,45 +19,142 @@ export const debugLatex = async (latex: string) => {
   });
 
   console.log(formattedSvg);
-  console.log(mml);
+  console.log(serializedMml);
 };
 
 window.debugLatex = debugLatex;
 
 export const deriveFormulaTree = (
-  latex: string
-): {
-  svgSpec: FormulaSVGSpec;
-  augmentedFormula: AugmentedFormula;
-} => {
+  latex: string,
+): { svgSpec: FormulaSVGSpec; augmentedFormula: AugmentedFormula } => {
+  latex = `\\begin{aligned}
+           ${latex}
+           \\end{aligned}`;
+  console.log("New derivation for", latex);
   const svgSpec = deriveFormulaSVGSpec(latex);
-  console.log(svgSpec);
+  debugLatex(latex);
+  console.log("SVG spec:", svgSpec);
+
+  const augmentedFormula = deriveAugmentedFormula(latex, svgSpec);
+  console.log(augmentedFormula);
 
   return {
     svgSpec,
-    augmentedFormula: new AugmentedFormula([
-      new Script(
-        "0.0.0",
-        new Identifier("0.0.0.0", "a"),
-        undefined,
-        new Numeral("0.0.0.1", 2)
-      ),
-      new Op("0.0.1", "+"),
-      new Script(
-        "0.0.2",
-        new Identifier("0.0.2.0", "b"),
-        undefined,
-        new Numeral("0.0.2.1", 2)
-      ),
-      new Op("0.0.3", "="),
-      new Script(
-        "0.0.4",
-        new Identifier("0.0.4.0", "c"),
-        undefined,
-        new Numeral("0.0.4.1", 2)
-      ),
-    ]),
+    augmentedFormula,
   };
+};
+
+export const deriveAugmentedFormula = (
+  latex: string,
+  svgSpec: FormulaSVGSpec,
+): AugmentedFormula => {
+  const serializedMml: string = MathJax.tex2mml(latex);
+  const mmlWrapper = document.createElement("div");
+  mmlWrapper.innerHTML = serializedMml;
+  const mml = mmlWrapper.querySelector("math");
+
+  const root = svgSpec.root as FormulaSVGGroup;
+
+  // return new AugmentedFormula(buildAugmentedFormulaNode(mml, root, "0"));
+
+  return new AugmentedFormula([
+    new Script(
+      "0.0.0",
+      new Identifier("0.0.0.0", "a"),
+      undefined,
+      new Numeral("0.0.0.1", 2),
+    ),
+    new Op("0.0.1", "+"),
+    new Script(
+      "0.0.2",
+      new Identifier("0.0.2.0", "b"),
+      undefined,
+      new Numeral("0.0.2.1", 2),
+    ),
+    new Op("0.0.3", "="),
+    new NewLine(),
+    new Script(
+      "0.0.4",
+      new Identifier("0.0.4.0", "c"),
+      undefined,
+      new Numeral("0.0.4.1", 2),
+    ),
+  ]);
+};
+
+const buildAugmentedFormulaNode = (
+  mmlNode: Element,
+  svgNode: FormulaSVGSpecNode,
+): AugmentedFormulaNode[] | null => {
+  if (svgNode.type === "g" && svgNode.mmlNode === mmlNode.tagName) {
+    if (mmlNode.tagName === "mo") {
+      console.log("Matched op", mmlNode.textContent);
+      return [new Op(svgNode.id, mmlNode.textContent!)];
+    } else if (mmlNode.tagName === "mi") {
+      console.log("Matched ident", mmlNode.textContent);
+      return [new Identifier(svgNode.id, mmlNode.textContent!)];
+    } else if (mmlNode.tagName === "mn") {
+      console.log("Matched number", mmlNode.textContent);
+      return [new Numeral(svgNode.id, parseFloat(mmlNode.textContent!))];
+    } else if (mmlNode.tagName === "mfrac") {
+      throw new Error("Not implemented");
+    } else if (mmlNode.tagName === "msup") {
+      console.log("Matching msup group...", mmlNode.innerHTML);
+      const children = buildAugmentedFormulaForest(
+        Array.from(mmlNode.children),
+        Array.from(svgNode.children),
+      );
+      if (children === null) {
+        return null;
+      }
+      const [base, sup] = children;
+      return [new Script(svgNode.id, base, undefined, sup)];
+    } else {
+      return buildAugmentedFormulaForest(
+        Array.from(mmlNode.children),
+        svgNode.children,
+      );
+    }
+  } else if (svgNode.type === "use" || svgNode.type === "rect") {
+    return null;
+  } else if (svgNode.type === "g") {
+    console.log("Bypassing a non-mml group", svgNode);
+    return buildAugmentedFormulaForest([mmlNode], svgNode.children);
+  } else {
+    console.log("Did not match any conditions");
+    return [];
+  }
+};
+
+const buildAugmentedFormulaForest = (
+  mmlNodes: Element[],
+  svgNodes: FormulaSVGSpecNode[],
+) => {
+  console.log("Trying to match", mmlNodes, "with", svgNodes);
+  let children: AugmentedFormulaNode[] = [];
+  let svgIndex = 0;
+  for (let i = 0; i < mmlNodes.length; i++) {
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      if (svgIndex >= svgNodes.length) {
+        console.log("Failed to match", mmlNodes, "with", svgNodes);
+        return null;
+      }
+
+      const buildResult = buildAugmentedFormulaNode(
+        mmlNodes[i],
+        svgNodes[svgIndex],
+      );
+
+      if (buildResult === null) {
+        svgIndex++;
+      } else {
+        children = children.concat(buildResult);
+        break;
+      }
+    }
+  }
+  return children;
 };
 
 window.deriveFormulaTree = deriveFormulaTree;
@@ -85,10 +189,11 @@ export const deriveFormulaSVGSpec = (latex: string): FormulaSVGSpec => {
 const buildFormulaSVGNode = (node: Element, id: string): FormulaSVGSpecNode => {
   if (node instanceof SVGGElement) {
     const children = Array.from(node.childNodes).map((child, i) =>
-      buildFormulaSVGNode(child as Element, `${id}.${i}`)
+      buildFormulaSVGNode(child as Element, `${id}.${i}`),
     );
     const transform = extractTransform(node.transform.baseVal);
-    return new FormulaSVGGroup(id, children, transform);
+    const mmlNode = node.getAttribute("data-mml-node");
+    return new FormulaSVGGroup(id, children, transform, mmlNode ?? undefined);
   } else if (node.nodeName === "use") {
     return new FormulaSVGUse(id, getAttributeOrThrow(node, "xlink:href"));
   } else if (node.nodeName === "rect") {
@@ -97,7 +202,7 @@ const buildFormulaSVGNode = (node: Element, id: string): FormulaSVGSpecNode => {
       parseFloat(getAttributeOrThrow(node, "x")),
       parseFloat(getAttributeOrThrow(node, "y")),
       parseFloat(getAttributeOrThrow(node, "width")),
-      parseFloat(getAttributeOrThrow(node, "height"))
+      parseFloat(getAttributeOrThrow(node, "height")),
     );
   }
   console.log("Unknown node type:", node);
@@ -180,7 +285,7 @@ export class AugmentedFormula {
   }
 }
 
-type AugmentedFormulaNode =
+export type AugmentedFormulaNode =
   | Script
   | Fraction
   | Op
@@ -189,28 +294,30 @@ type AugmentedFormulaNode =
   | NewLine
   | AlignMarker;
 
-class Script implements AugmentedFormulaNodeBase {
+export class Script implements AugmentedFormulaNodeBase {
   public type = "script" as const;
   constructor(
     public svgId: string,
     public base: AugmentedFormulaNode,
     public sub?: AugmentedFormulaNode,
-    public sup?: AugmentedFormulaNode
+    public sup?: AugmentedFormulaNode,
   ) {}
 
   toLatex(): string {
-    return `${this.base.toLatex()}${this.sub ? `_{${this.sub.toLatex()}}` : ""}${this.sup ? `^{${this.sup.toLatex()}}` : ""}`;
+    return `${this.base.toLatex()}${
+      this.sub ? `_{${this.sub.toLatex()}}` : ""
+    }${this.sup ? `^{${this.sup.toLatex()}}` : ""}`;
   }
 }
 
 /**
  * Multiple terms separated by the same operator, e.g. `a + b + c`
  */
-class Op implements AugmentedFormulaNodeBase {
+export class Op implements AugmentedFormulaNodeBase {
   public type = "op" as const;
   constructor(
     public svgId: string,
-    public op: string
+    public op: string,
   ) {}
 
   toLatex(): string {
@@ -218,12 +325,12 @@ class Op implements AugmentedFormulaNodeBase {
   }
 }
 
-class Fraction implements AugmentedFormulaNodeBase {
+export class Fraction implements AugmentedFormulaNodeBase {
   public type = "frac" as const;
   constructor(
     public svgId: string,
     public numerator: AugmentedFormulaNode,
-    public denominator: AugmentedFormulaNode
+    public denominator: AugmentedFormulaNode,
   ) {}
 
   toLatex(): string {
@@ -231,11 +338,11 @@ class Fraction implements AugmentedFormulaNodeBase {
   }
 }
 
-class Identifier implements AugmentedFormulaNodeBase {
+export class Identifier implements AugmentedFormulaNodeBase {
   public type = "ident" as const;
   constructor(
     public svgId: string,
-    public name: string
+    public name: string,
   ) {}
 
   toLatex(): string {
@@ -243,11 +350,11 @@ class Identifier implements AugmentedFormulaNodeBase {
   }
 }
 
-class Numeral implements AugmentedFormulaNodeBase {
+export class Numeral implements AugmentedFormulaNodeBase {
   public type = "number" as const;
   constructor(
     public svgId: string,
-    public value: number
+    public value: number,
   ) {}
 
   toLatex(): string {
@@ -255,7 +362,7 @@ class Numeral implements AugmentedFormulaNodeBase {
   }
 }
 
-class NewLine implements AugmentedFormulaNodeBase {
+export class NewLine implements AugmentedFormulaNodeBase {
   public type = "newline" as const;
   constructor() {}
 
@@ -264,7 +371,7 @@ class NewLine implements AugmentedFormulaNodeBase {
   }
 }
 
-class AlignMarker implements AugmentedFormulaNodeBase {
+export class AlignMarker implements AugmentedFormulaNodeBase {
   public type = "align" as const;
   constructor() {}
 
@@ -283,7 +390,7 @@ export class FormulaSVGSpec {
     public defs: { id: string; d: string }[],
     public root: FormulaSVGSpecNode,
     public viewBox: { x: number; y: number; width: number; height: number },
-    public dimensions: { width: number; height: number; unit: string }
+    public dimensions: { width: number; height: number; unit: string },
   ) {}
 
   static empty(): FormulaSVGSpec {
@@ -291,7 +398,7 @@ export class FormulaSVGSpec {
       [],
       new FormulaSVGGroup("0", [], {}),
       { x: 0, y: 0, width: 0, height: 0 },
-      { width: 0, height: 0, unit: "px" }
+      { width: 0, height: 0, unit: "px" },
     );
   }
 }
@@ -307,7 +414,8 @@ class FormulaSVGGroup {
   constructor(
     public id: string,
     public children: FormulaSVGSpecNode[],
-    public transform: FormulaSVGTransform
+    public transform: FormulaSVGTransform,
+    public mmlNode?: string,
   ) {}
 }
 
@@ -316,7 +424,7 @@ class FormulaSVGUse {
 
   constructor(
     public id: string,
-    public linkHref: string
+    public linkHref: string,
   ) {}
 }
 
@@ -328,6 +436,6 @@ class FormulaSVGRect {
     public x: number,
     public y: number,
     public width: number,
-    public height: number
+    public height: number,
   ) {}
 }
