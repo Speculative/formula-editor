@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 
 import App from "./App.tsx";
+import { formulaStore } from "./store";
 
 window.MathJax = {
   // @ts-expect-error This is valid, MathJax types are incomplete
@@ -23,6 +24,13 @@ window.MathJax = {
           <App />
         </React.StrictMode>
       );
+
+      // Initialize LaTeX from query parameter if present
+      const urlParams = new URLSearchParams(window.location.search);
+      const initialLatex = urlParams.get("latex");
+      if (initialLatex) {
+        formulaStore.restoreFormulaState(decodeURIComponent(initialLatex));
+      }
     },
   },
 };

@@ -391,6 +391,9 @@ export const Editor = observer(() => {
           border-bottom: ${styles.TOP_BAR_BORDER};
           padding-left: 0.5rem;
           padding-right: 0.5rem;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
         `}
       >
         <h1
@@ -403,6 +406,33 @@ export const Editor = observer(() => {
         >
           LaTeX
         </h1>
+        <button
+          css={css`
+            height: 2rem;
+            min-width: 2rem;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            background: transparent;
+            border: none;
+            color: ${styles.COLORS.foreground};
+            font-family: "Source Sans 3", sans-serif;
+            padding: 0 0.5rem;
+            &:hover {
+              background: ${styles.COLORS.baseLight};
+            }
+          `}
+          onClick={async (e) => {
+            e.stopPropagation();
+            const latex = formulaStore.latexWithoutStyling;
+            const url = `${window.location.origin}${window.location.pathname}?latex=${encodeURIComponent(latex)}`;
+            await navigator.clipboard.writeText(url);
+          }}
+          title="Copy shareable link"
+        >
+          📋
+        </button>
         {/*
         <EditorTab
           onClick={() => setCurrentEditor("full")}
